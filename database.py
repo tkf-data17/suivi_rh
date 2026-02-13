@@ -1,189 +1,197 @@
 import pandas as pd
-import os
-from datetime import datetime
+import streamlit as st
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import json
 
 class DataManager:
-    def __init__(self, file_path="suivi_employes.xlsx"):
-        self.file_path = file_path
-        self.columns = [
-            "N° ordre", 
-            "Date", 
-            "Nom et Prenoms", 
-            "Sexe", 
-            "Service", 
-            "Heure d'arrivée", 
-            "Heure de départ"
-        ]
-        self.personnel_file = "liste personnel.xlsx"
-        self._ensure_file_exists()
+    def __init__(self):
+        # Authenticate with Google Sheets
+        self.scope = ["https://spreadsheets.google.com/feeds", 'https://www.googleapis.com/auth/spreadsheets',
+                 "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive"]
+        
+        self.creds = None
+        self.client = None
+        self.sheet = None
+        
+        self._connect_google_sheets()
 
-    def _ensure_file_exists(self):
-        """Creates the excel file if it doesn't exist."""
-        if not os.path.exists(self.file_path):
-            df = pd.DataFrame(columns=self.columns)
-            df.to_excel(self.file_path, index=False)
+    def _connect_google_sheets(self):
+        """Connects to Google Sheets using Streamlit secrets."""
+        try:
+            if "gcp_service_account" in st.secrets:
+                # Load from secrets.toml
+                creds_dict = dict(st.secrets["gcp_service_account"])
+                self.creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, self.scope)
+            else:
+                # Fallback or error if not configured
+                st.error("⚠️ Secrets Google Sheets non configurés ! Ajoutez [gcp_service_account] dans .streamlit/secrets.toml")
+                return
+
+            self.client = gspread.authorize(self.creds)
+            
+            # Open the Spreadsheet (Replace with your actual Sheet Name)
+            # We assume a single Spreadsheet with two tabs: "Mouvements" and "Personnel"
+            sheet_name = "SUIVI_PERSONNEL_DB" # You might want to let user configure this
+            try:
+                self.sheet = self.client.open(sheet_name)
+            except gspread.SpreadsheetNotFound:
+                st.error(f"❌ Impossible de trouver le Google Sheet nommé '{sheet_name}'. Veuillez le créer et le partager avec l'email du service account.")
+                return
+
+        except Exception as e:
+            st.error(f"Erreur de connexion Google Sheets : {e}")
 
     def load_data(self):
-        """Loads data from the excel file."""
+        """Loads movements data from 'Mouvements' worksheet."""
+        if not self.sheet: return pd.DataFrame()
         try:
-            return pd.read_excel(self.file_path)
+            worksheet = self.sheet.worksheet("Mouvements")
+            data = worksheet.get_all_records()
+            return pd.DataFrame(data)
+        except gspread.WorksheetNotFound:
+            # Create if missing
+            worksheet = self.sheet.add_worksheet(title="Mouvements", rows="1000", cols="20")
+            worksheet.append_row(["N° ordre", "Date", "Nom et Prenoms", "Sexe", "Service", "Heure d'arrivée", "Heure de départ"])
+            return pd.DataFrame(columns=["N° ordre", "Date", "Nom et Prenoms", "Sexe", "Service", "Heure d'arrivée", "Heure de départ"])
         except Exception as e:
-            return pd.DataFrame(columns=self.columns)
+            st.error(f"Erreur lecture données: {e}")
+            return pd.DataFrame()
 
     def load_personnel(self):
-        """Loads personnel list from JSON for dropdowns and returns a DataFrame."""
-        json_path = "personnel.json"
-        
-        # If JSON doesn't exist but Excel does, convert on the fly
-        if not os.path.exists(json_path) and os.path.exists(self.personnel_file):
-            try:
-                df = pd.read_excel(self.personnel_file)
-                # Save as JSON for future use
-                df.to_json(json_path, orient='records', force_ascii=False, indent=4)
-                return df
-            except:
-                pass
-                
+        """Loads personnel list from 'Personnel' worksheet."""
+        if not self.sheet: return pd.DataFrame()
         try:
-            if os.path.exists(json_path):
-                return pd.read_json(json_path, orient='records')
-            return pd.DataFrame()
+            worksheet = self.sheet.worksheet("Personnel")
+            data = worksheet.get_all_records()
+            return pd.DataFrame(data)
+        except gspread.WorksheetNotFound:
+             # Create if missing
+            worksheet = self.sheet.add_worksheet(title="Personnel", rows="1000", cols="10")
+            worksheet.append_row(["N° ordre", "Nom et Prénoms", "Sexe", "Service"])
+            return pd.DataFrame(columns=["N° ordre", "Nom et Prénoms", "Sexe", "Service"])
         except Exception:
-            # Fallback to empty if error
             return pd.DataFrame()
 
     def add_employee(self, name, sexe, service):
-        """Adds a new employee to the personnel JSON file."""
-        json_path = "personnel.json"
-        new_record = {"Nom et Prénoms": name, "Sexe": sexe, "Service": service}
+        """Adds or updates an employee in 'Personnel' sheet."""
+        if not self.sheet: return False, "Erreur connexion."
         
         try:
+            worksheet = self.sheet.worksheet("Personnel")
             df = self.load_personnel()
-            new_df = pd.DataFrame([new_record])
             
-            # Check for duplicates? For now, we allow details to be updated or new entries
-             # If name exists, maybe update? Or just append.
-             # User said "add function", let's assume append or update if exists.
-            
+            # Check for existing
             if not df.empty and "Nom et Prénoms" in df.columns:
-                 # If name exists, update it
-                 if name in df["Nom et Prénoms"].values:
-                     df.loc[df["Nom et Prénoms"] == name, ["Sexe", "Service"]] = [sexe, service]
-                     msg = "Mise à jour effectuée."
-                 else:
-                     df = pd.concat([df, new_df], ignore_index=True)
-                     msg = "Employé ajouté avec succès."
+                existing_idx = df.index[df["Nom et Prénoms"] == name].tolist()
+                
+                if existing_idx:
+                    # Update row (Google Sheets is 1-indexed, header is row 1, so row = index + 2)
+                    row_num = existing_idx[0] + 2
+                    # Update Sexe (Col 3) and Service (Col 4)
+                    worksheet.update_cell(row_num, 3, sexe)
+                    worksheet.update_cell(row_num, 4, service)
+                    return True, "Mise à jour effectuée."
+                else:
+                    # New ID
+                    new_id = 1
+                    try:
+                        if "N° ordre" in df.columns:
+                            max_id = pd.to_numeric(df["N° ordre"], errors='coerce').max()
+                            new_id = int(max_id) + 1 if pd.notna(max_id) else 1
+                    except:
+                        pass
+                    
+                    worksheet.append_row([new_id, name, sexe, service])
+                    return True, f"Employé ajouté avec succès. (ID: {new_id})"
             else:
-                 df = new_df
-                 msg = "Employé ajouté avec succès."
-            
-            # Save back to JSON
-            df.to_json(json_path, orient='records', force_ascii=False, indent=4)
-            return True, msg
+                worksheet.append_row([1, name, sexe, service])
+                return True, "Employé ajouté avec succès. (ID: 1)"
+
         except Exception as e:
             return False, f"Erreur ajout: {e}"
 
     def delete_employee(self, name):
-        """Deletes an employee from the personnel JSON file."""
-        json_path = "personnel.json"
-        
+        """Deletes an employee from 'Personnel' worksheet."""
+        if not self.sheet: return False, "Erreur connexion."
         try:
-            df = self.load_personnel()
-            if not df.empty and "Nom et Prénoms" in df.columns:
-                if name in df["Nom et Prénoms"].values:
-                    df = df[df["Nom et Prénoms"] != name]
-                    df.to_json(json_path, orient='records', force_ascii=False, indent=4)
-                    return True, "Employé supprimé avec succès."
+            worksheet = self.sheet.worksheet("Personnel")
+            cell = worksheet.find(name)
+            if cell:
+                worksheet.delete_rows(cell.row)
+                return True, "Employé supprimé avec succès."
             return False, "Employé non trouvé."
         except Exception as e:
             return False, f"Erreur suppression: {e}"
 
-    def save_data(self, df):
-        """Saves the dataframe to the excel file and a JSON backup."""
-        # Save Excel
-        df.to_excel(self.file_path, index=False)
+    def upsert_entry(self, date_val, name, gender, service, arrival_time, departure_time):
+        """Adds or updates an entry in 'Mouvements'."""
+        if not self.sheet: return False, "Erreur connexion."
         
-        # Save JSON Backup
         try:
-            json_backup_path = self.file_path.replace(".xlsx", ".json")
-            # Convert datetime objects to string for JSON serialization if needed, 
-            # though pandas to_json usually handles it (ISO format).
-            df.to_json(json_backup_path, orient='records', force_ascii=False, indent=4, date_format='iso')
+            worksheet = self.sheet.worksheet("Mouvements")
+            df = self.load_data()
+            
+            # Logic to find row index
+            row_to_update = None
+            if not df.empty:
+                # Iterate or filter. Since we need row number, iteration might be safer if not too large
+                # Or find by name, then check date?
+                # Let's use simple logic: row index corresponds to df index + 2
+                
+                mask = (df["Nom et Prenoms"].astype(str).str.strip() == str(name).strip()) & \
+                       (df["Date"].astype(str) == date_val)
+                
+                if mask.any():
+                    row_idx = df.index[mask][0]
+                    row_to_update = row_idx + 2 # Header + 0-based index
+
+            if row_to_update:
+                # Update cols: Sexe(4), Service(5), Arr(6), Dep(7)
+                # Col indices: 1=Ordre, 2=Date, 3=Nom, 4=Sexe, 5=Service, 6=Arr, 7=Dep
+                worksheet.update_cell(row_to_update, 4, gender)
+                worksheet.update_cell(row_to_update, 5, service)
+                worksheet.update_cell(row_to_update, 6, arrival_time)
+                if departure_time:
+                    worksheet.update_cell(row_to_update, 7, departure_time)
+                
+                return True, f"Mise à jour effectuée pour {name} (Date: {date_val})"
+            else:
+                # INSERT
+                new_id = 1
+                if not df.empty and "N° ordre" in df.columns:
+                    try:
+                        max_id = pd.to_numeric(df["N° ordre"], errors='coerce').max()
+                        new_id = int(max_id) + 1 if pd.notna(max_id) else 1
+                    except:
+                        pass
+                
+                worksheet.append_row([
+                    new_id,
+                    date_val,
+                    name,
+                    gender,
+                    service,
+                    arrival_time,
+                    departure_time
+                ])
+                # Note: prepend not supported by append_row easily, append is end. 
+                # Sorting in visualization handles order.
+                return True, f"Entrée ajoutée avec succès ! (ID: {new_id})"
+
         except Exception as e:
-            print(f"Warning: Could not save JSON backup: {e}")
+            return False, f"Erreur enregistrement: {e}"
 
     def get_entry_for_today(self, name, date_val):
-        """Checks if an entry exists for the given name and date."""
-        try:
-            df = self.load_data()
-            if df.empty:
-                return None
-            
-            # Filter by matching Name and Date
-            # Ensure types match. Excel date might be string or datetime.
-            # date_val passed from st.date_input is a date object.
-            # Converting to string format DD/MM/YYYY might be safest for comparison if that's how we save.
-            
-            # We save as %d/%m/%Y in execute_entry (d_str).
-            # So we compare strings.
-            
-            mask = (df["Nom et Prenoms"].astype(str).str.strip() == str(name).strip()) & \
-                   (df["Date"].astype(str) == date_val)
-            
-            match = df[mask]
-            if not match.empty:
-                return match.iloc[0].to_dict()
-            return None
-        except Exception:
-            return None
+         # Helper to check local cache or fetch fresh? 
+         # For simplicity, we just reload data. In prod, cache this.
+         df = self.load_data()
+         if df.empty: return None
+         mask = (df["Nom et Prenoms"].astype(str).str.strip() == str(name).strip()) & \
+                (df["Date"].astype(str) == date_val)
+         match = df[mask]
+         if not match.empty:
+             return match.iloc[0].to_dict()
+         return None
 
-    def upsert_entry(self, date_val, name, gender, service, arrival_time, departure_time):
-        """Adds or updates an entry based on Date and Name."""
-        df = self.load_data()
-        
-        # Check if exists
-        mask = (df["Nom et Prenoms"].astype(str).str.strip() == str(name).strip()) & \
-               (df["Date"].astype(str) == date_val)
-               
-        if mask.any():
-            # UPDATE existing
-            idx = df.index[mask][0]
-            # Update fields
-            # We preserve arrival time if it was already there and user didn't change it?
-            # Actually, the user passes the desired state. So we overwrite.
-            # However, we must ensure we don't accidentally wipe data if user passed empty?
-            # The form passes whatever is in the inputs.
-            
-            df.at[idx, "Sexe"] = gender
-            df.at[idx, "Service"] = service
-            df.at[idx, "Heure d'arrivée"] = arrival_time
-            if departure_time: # Only update departure if provided, or allow clearing?
-                df.at[idx, "Heure de départ"] = departure_time
-            
-            self.save_data(df)
-            return True, f"Mise à jour effectuée pour {name} (Date: {date_val})"
-            
-        else:
-            # INSERT new
-            if df.empty:
-                new_id = 1
-            else:
-                try:
-                    max_id = pd.to_numeric(df["N° ordre"], errors='coerce').max()
-                    new_id = int(max_id) + 1 if pd.notna(max_id) else 1
-                except:
-                    new_id = 1
-                    
-            new_entry = pd.DataFrame([{
-                "N° ordre": new_id,
-                "Date": date_val,
-                "Nom et Prenoms": name,
-                "Sexe": gender,
-                "Service": service,
-                "Heure d'arrivée": arrival_time,
-                "Heure de départ": departure_time
-            }])
-            
-            updated_df = pd.concat([new_entry, df], ignore_index=True)
-            self.save_data(updated_df)
-            return True, f"Entrée ajoutée avec succès ! (ID: {new_id})"
+
