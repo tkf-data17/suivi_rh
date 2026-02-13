@@ -7,6 +7,7 @@ import io
 import re
 import base64
 import os
+import stats
 
 # Page Configuration
 st.set_page_config(
@@ -255,6 +256,11 @@ def view_saisie_mouvements():
     st.markdown("### 🕒 Derniers Enregistrements")
     df = db.load_data()
     if not df.empty:
+        # Sort by Order Number Descending (Latest entries first)
+        if "N° ordre" in df.columns:
+             # Ensure numeric for sorting
+             df["N° ordre"] = pd.to_numeric(df["N° ordre"], errors='coerce')
+             df = df.sort_values(by="N° ordre", ascending=False)
         st.dataframe(df.head(5), use_container_width=True, hide_index=True)
 
 def view_nouveau_personnel():
@@ -477,7 +483,7 @@ def main():
         
         selection = st.radio(
             "Navigation",
-            ["📝 Saisie Mouvements", "➕ Nouveau Personnel", "📊 Visualisation"],
+            ["📝 Saisie Mouvements", "➕ Nouveau Personnel", "📊 Visualisation", "📊 Statistiques"],
             label_visibility="collapsed"
         )
         
@@ -513,6 +519,8 @@ def main():
         view_nouveau_personnel()
     elif selection == "📊 Visualisation":
         view_visualisation()
+    elif selection == "📊 Statistiques":
+        stats.view_dashboard(db)
 
 if __name__ == "__main__":
     main()
