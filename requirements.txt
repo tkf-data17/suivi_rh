@@ -4,3 +4,4 @@ openpyxl
 xlsxwriter
 gspread
 oauth2client
+matplotlib
