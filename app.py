@@ -481,6 +481,8 @@ def view_nouveau_personnel():
                     st.success(f"Détails mis à jour pour {target_name_display}")
                     st.session_state.personnel_list = db.load_personnel()
                     st.session_state.confirm_action_type = None
+                    # Clear selection to empty form
+                    st.session_state.manage_emp_select = ""
                     st.rerun()
                 else:
                     st.error(msg)
@@ -498,9 +500,8 @@ def view_nouveau_personnel():
                     st.warning(f"Employé {selected_emp_manage} a été supprimé.")
                     st.session_state.personnel_list = db.load_personnel()
                     st.session_state.confirm_action_type = None
-                    # DO NOT reset manage_emp_select manually as it's a widget key, just rerun.
-                    # Rerunning will likely reset or refresh the state naturally if the item is gone.
-                    # Or we can rely on on_change callback next time.
+                    # Clear selection to empty form
+                    st.session_state.manage_emp_select = ""
                     st.rerun()
                 else:
                     st.error(msg)
