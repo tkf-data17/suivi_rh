@@ -424,11 +424,13 @@ def view_nouveau_personnel():
         col_m1, col_m2 = st.columns(2)
         with col_m1:
             new_nom_m = st.text_input("Nom de famille", value=val_nom, key=f"m_nom_{selected_emp_manage}")
-            new_sex_m = st.selectbox("Sexe", ["M", "F"], index=sex_idx, key="m_sex")
+            # Dynamic key ensures value updates when selection changes
+            new_sex_m = st.selectbox("Sexe", ["M", "F"], index=sex_idx, key=f"m_sex_{selected_emp_manage}")
         
         with col_m2:
             new_prenoms_m = st.text_input("Prénoms", value=val_prenoms, key=f"m_prenom_{selected_emp_manage}")
-            target_service_m = st.selectbox("Service", mgmt_services, index=svc_idx, key="m_svc_select")
+            # Dynamic key ensures value updates when selection changes
+            target_service_m = st.selectbox("Service", mgmt_services, index=svc_idx, key=f"m_svc_{selected_emp_manage}")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
