@@ -373,6 +373,48 @@ def view_nouveau_personnel():
     # --- MANAGE EXISTING EMPLOYEES ---
     st.markdown("<div class='info-card'><h3>🛠️ Gérer le personnel existant</h3>", unsafe_allow_html=True)
     
+    # Callback Handlers
+    def handle_update_confirm():
+        c_data = st.session_state.confirm_emp_data
+        success, msg = db.add_employee(
+            c_data.get('name'), 
+            c_data.get('sex'), 
+            c_data.get('service'),
+            original_name=c_data.get('original_name')
+        )
+        if success:
+            st.session_state.manage_success_msg = f"Détails mis à jour pour {c_data.get('name')}"
+            st.session_state.personnel_list = db.load_personnel()
+            st.session_state.confirm_action_type = None
+            st.session_state.manage_emp_select = "" # Safe here in callback
+        else:
+            st.session_state.manage_error_msg = msg
+
+    def handle_delete_confirm():
+        # Get name from current selection context, but accessed via state or passed data
+        # For safety, use the selection state directly if valid, or store it in confirm_emp_data
+        name_to_del = st.session_state.manage_emp_select
+        success, msg = db.delete_employee(name_to_del)
+        if success:
+            st.session_state.manage_success_msg = f"Employé {name_to_del} a été supprimé."
+            st.session_state.personnel_list = db.load_personnel()
+            st.session_state.confirm_action_type = None
+            st.session_state.manage_emp_select = "" # Safe here
+        else:
+            st.session_state.manage_error_msg = msg
+
+    def handle_cancel():
+        st.session_state.confirm_action_type = None
+
+    # Display Messages from callbacks
+    if 'manage_success_msg' in st.session_state and st.session_state.manage_success_msg:
+        st.success(st.session_state.manage_success_msg)
+        del st.session_state.manage_success_msg
+    
+    if 'manage_error_msg' in st.session_state and st.session_state.manage_error_msg:
+        st.error(st.session_state.manage_error_msg)
+        del st.session_state.manage_error_msg
+
     col_search_emp, col_action_emp = st.columns([2, 1])
     
     personnel_names = []
@@ -470,45 +512,18 @@ def view_nouveau_personnel():
             
             st.info(f"❓ Confirmer la mise à jour pour **{target_name_display}** ?")
             col_yes, col_no = st.columns(2)
-            if col_yes.button("✅ Oui, mettre à jour", use_container_width=True):
-                success, msg = db.add_employee(
-                    c_data.get('name'), 
-                    c_data.get('sex'), 
-                    c_data.get('service'),
-                    original_name=c_data.get('original_name')
-                )
-                if success:
-                    st.success(f"Détails mis à jour pour {target_name_display}")
-                    st.session_state.personnel_list = db.load_personnel()
-                    st.session_state.confirm_action_type = None
-                    # Clear selection to empty form
-                    st.session_state.manage_emp_select = ""
-                    st.rerun()
-                else:
-                    st.error(msg)
             
-            if col_no.button("❌ Annuler", use_container_width=True):
-                 st.session_state.confirm_action_type = None
-                 st.rerun()
+            # Use callback on click
+            col_yes.button("✅ Oui, mettre à jour", use_container_width=True, on_click=handle_update_confirm)
+            col_no.button("❌ Annuler", use_container_width=True, on_click=handle_cancel)
 
         elif st.session_state.confirm_action_type == 'DELETE':
             st.error(f"⚠️ **ATTENTION** : Vous êtes sur le point de supprimer **{selected_emp_manage}** définitivement.")
             col_yes, col_no = st.columns(2)
-            if col_yes.button("🗑️ Oui, supprimer définitivement", type="primary", use_container_width=True):
-                success, msg = db.delete_employee(selected_emp_manage)
-                if success:
-                    st.warning(f"Employé {selected_emp_manage} a été supprimé.")
-                    st.session_state.personnel_list = db.load_personnel()
-                    st.session_state.confirm_action_type = None
-                    # Clear selection to empty form
-                    st.session_state.manage_emp_select = ""
-                    st.rerun()
-                else:
-                    st.error(msg)
             
-            if col_no.button("❌ Annuler", use_container_width=True):
-                 st.session_state.confirm_action_type = None
-                 st.rerun()
+            # Use callback on click
+            col_yes.button("🗑️ Oui, supprimer définitivement", type="primary", use_container_width=True, on_click=handle_delete_confirm)
+            col_no.button("❌ Annuler", use_container_width=True, on_click=handle_cancel)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
