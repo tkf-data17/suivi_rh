@@ -23,6 +23,11 @@ st.markdown(style.get_custom_css(), unsafe_allow_html=True)
 # Initialize Data Manager
 if 'db' not in st.session_state:
     st.session_state.db = DataManager()
+elif not hasattr(st.session_state.db, 'load_services'):
+    # Force reload if old instance doesn't have the new method
+    del st.session_state.db
+    st.session_state.db = DataManager()
+
 db = st.session_state.db
 
 # Load personnel data (Force reload if specified)
