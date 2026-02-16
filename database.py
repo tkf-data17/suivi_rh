@@ -118,13 +118,19 @@ class DataManager:
                 worksheet = self.sheet.add_worksheet(title="Services", rows="100", cols="2")
                 worksheet.append_row(["Service"])
 
-            # Check duplication
+            # Standardize: Title Case (Premières lettres en majuscules)
+            service_clean = service_name.strip().title()
+
+            # Check duplication (case-insensitive)
             existing = worksheet.col_values(1)
-            if service_name in existing:
-                return False, "Ce service existe déjà."
+            # Filter valid strings and lower them for comparison
+            existing_lower = [str(x).strip().lower() for x in existing if x]
             
-            worksheet.append_row([service_name])
-            return True, f"Service '{service_name}' ajouté."
+            if service_clean.lower() in existing_lower:
+                return False, f"Le service '{service_clean}' existe déjà."
+            
+            worksheet.append_row([service_clean])
+            return True, f"Service '{service_clean}' ajouté."
         except Exception as e:
             return False, f"Erreur ajout service: {e}"
 
