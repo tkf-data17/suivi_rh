@@ -274,6 +274,38 @@ def view_nouveau_personnel():
         st.success(st.session_state.success_msg_new)
         st.session_state.success_msg_new = None
 
+    # Helper to get consolidated services list
+    def get_all_services():
+        # 1. Start with services from DB reference sheet
+        services = db.load_services()
+        
+        # 2. Add any services currently attached to employees but not in ref list
+        if not st.session_state.personnel_list.empty:
+            cols = st.session_state.personnel_list.columns.tolist()
+            svc_col = next((c for c in cols if "service" in c.lower()), None)
+            if svc_col:
+                used_services = st.session_state.personnel_list[svc_col].dropna().astype(str).unique().tolist()
+                for s in used_services:
+                    if s not in services and s.strip():
+                        services.append(s)
+        
+        # 3. Clean and Sort
+        services = sorted(list(set([s.strip() for s in services if s.strip()])))
+        
+        # 4. Fallback if empty
+        if not services:
+             services = [
+                "Prélèvements", "Parc Auto", "Comptabilité Matière", 
+                "Hygiène Assainissement", "Biologie Moléculaire", 
+                "Administration", "Autre"
+            ]
+        
+        # Final Sort
+        services.sort(key=lambda x: x.lower())
+        return services
+
+    all_services = get_all_services()
+
     with st.form("new_employee_form", clear_on_submit=True):
         col_n1, col_n2 = st.columns(2)
         with col_n1:
@@ -281,11 +313,9 @@ def view_nouveau_personnel():
             new_sex = st.selectbox("Sexe", ["M", "F"])
         with col_n2:
             new_prenoms = st.text_input("Prénoms")
-            new_service = st.selectbox("Service", [
-            "Prélèvements", "Parc Auto", "Comptabilité Matière", 
-            "Hygiène Assainissement", "Biologie Moléculaire", 
-            "Administration", "Autre"
-        ])
+            # Service selection from consolidated list
+            # If user wants a new one, they must add it below first
+            new_service = st.selectbox("Service", all_services)
         
         st.markdown("<br>", unsafe_allow_html=True)
         submitted_new = st.form_submit_button("Ajouter à la base de données")
@@ -306,6 +336,33 @@ def view_nouveau_personnel():
                 else:
                     st.error(msg)
     
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # --- MANAGE SERVICES SECTION ---
+    st.markdown("<div class='info-card'><h3>🏢 Gestion des Services</h3>", unsafe_allow_html=True)
+    
+    if 'success_msg_service' in st.session_state and st.session_state.success_msg_service:
+        st.success(st.session_state.success_msg_service)
+        st.session_state.success_msg_service = None
+    
+    col_svc_inp, col_svc_btn = st.columns([3, 1])
+    with col_svc_inp:
+        new_service_input = st.text_input("Nouveau Service", placeholder="Ex: Ressources Humaines", key="new_svc_add_input")
+    
+    with col_svc_btn:
+        st.write("") # Spacer
+        st.write("")
+        if st.button("➕ Créer Service", type="primary", use_container_width=True):
+            if new_service_input:
+                success, msg = db.add_service_ref(new_service_input.strip())
+                if success:
+                    st.session_state.success_msg_service = msg
+                    st.rerun()
+                else:
+                    st.error(msg)
+            else:
+                st.error("Nom du service requis.")
+
     st.markdown("</div>", unsafe_allow_html=True)
 
     # --- MANAGE EXISTING EMPLOYEES ---
@@ -341,18 +398,17 @@ def view_nouveau_personnel():
         sex_idx = 0
         if s_current == "F": sex_idx = 1
         
-        # Determine index for Service
-        svc_options = [
-            "Prélèvements", "Parc Auto", "Comptabilité Matière", 
-            "Hygiène Assainissement", "Biologie Moléculaire", 
-            "Administration", "Autre"
-        ]
-        if svc_current and svc_current not in svc_options:
-            svc_options.append(svc_current)
-            
+        # Determine dynamic services for management too
+        mgmt_services = get_all_services()
+
+        # Ensure current service is in the list (if it's a weird legacy one)
+        if svc_current and svc_current not in mgmt_services:
+            mgmt_services.append(svc_current)
+            mgmt_services.sort()
+
         svc_idx = 0
-        if svc_current in svc_options:
-            svc_idx = svc_options.index(svc_current)
+        if svc_current in mgmt_services:
+            svc_idx = mgmt_services.index(svc_current)
 
         # Use columns for layout same as before, but outside st.form for interactivity
         col_m1, col_m2 = st.columns(2)
@@ -363,7 +419,7 @@ def view_nouveau_personnel():
         with col_m2:
             st.write("") # Spacer for alignment
             st.write("")
-            new_service_m = st.selectbox("Service", svc_options, index=svc_idx, key="m_svc")
+            target_service_m = st.selectbox("Service", mgmt_services, index=svc_idx, key="m_svc_select")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -376,14 +432,17 @@ def view_nouveau_personnel():
         with col_btn1:
             if st.button("💾 Mettre à jour", type="primary", use_container_width=True):
                 st.session_state.confirm_action_type = 'UPDATE'
-                st.session_state.confirm_emp_data = {'sex': new_sex_m, 'service': new_service_m}
-                st.rerun()
+                if not target_service_m:
+                    st.error("Nom du service invalide")
+                else: 
+                    st.session_state.confirm_emp_data = {'sex': new_sex_m, 'service': target_service_m}
+                    st.rerun()
 
         with col_btn2:
             if st.button("🗑️ Supprimer", type="secondary", use_container_width=True):
                 st.session_state.confirm_action_type = 'DELETE'
                 st.rerun()
-
+             
         # Confirmation Dialogs
         if st.session_state.confirm_action_type == 'UPDATE':
             st.info(f"❓ Confirmer la mise à jour pour **{selected_emp_manage}** ?")

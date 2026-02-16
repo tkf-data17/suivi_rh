@@ -73,6 +73,61 @@ class DataManager:
         except Exception:
             return pd.DataFrame()
 
+    def load_services(self):
+        """Loads services list from 'Services' worksheet."""
+        if not self.sheet: return []
+        try:
+            worksheet = self.sheet.worksheet("Services")
+            data = worksheet.get_all_values()
+            # Assuming first row is header, or simple list
+            # Let's assume simple list column 1, starting row 2 if header
+            if not data: return []
+            
+            # Check if header exists
+            if data and "Service" in data[0]:
+                df = pd.DataFrame(data[1:], columns=data[0])
+                return df["Service"].dropna().unique().tolist()
+            else:
+                # Flat list assumption
+                return [item[0] for item in data if item]
+                
+        except gspread.WorksheetNotFound:
+            # Create silently
+            try:
+                worksheet = self.sheet.add_worksheet(title="Services", rows="100", cols="2")
+                worksheet.append_row(["Service"])
+                # Add defaults
+                defaults = ["Prélèvements", "Parc Auto", "Comptabilité Matière", 
+                            "Hygiène Assainissement", "Biologie Moléculaire", 
+                            "Administration"]
+                for d in defaults:
+                    worksheet.append_row([d])
+                return defaults
+            except:
+                return []
+        except Exception:
+            return []
+
+    def add_service_ref(self, service_name):
+        """Adds a service to the reference list."""
+        if not self.sheet: return False, "Erreur connexion."
+        try:
+            try:
+                worksheet = self.sheet.worksheet("Services")
+            except gspread.WorksheetNotFound:
+                worksheet = self.sheet.add_worksheet(title="Services", rows="100", cols="2")
+                worksheet.append_row(["Service"])
+
+            # Check duplication
+            existing = worksheet.col_values(1)
+            if service_name in existing:
+                return False, "Ce service existe déjà."
+            
+            worksheet.append_row([service_name])
+            return True, f"Service '{service_name}' ajouté."
+        except Exception as e:
+            return False, f"Erreur ajout service: {e}"
+
     def add_employee(self, name, sexe, service):
         """Adds or updates an employee in 'Personnel' sheet."""
         if not self.sheet: return False, "Erreur connexion."
@@ -193,5 +248,3 @@ class DataManager:
          if not match.empty:
              return match.iloc[0].to_dict()
          return None
-
-
