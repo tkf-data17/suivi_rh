@@ -416,14 +416,18 @@ def view_nouveau_personnel():
             svc_idx = mgmt_services.index(svc_current)
 
         # Use columns for layout same as before, but outside st.form for interactivity
+        # Prepare content for split name
+        parts = selected_emp_manage.split(' ', 1)
+        val_nom = parts[0]
+        val_prenoms = parts[1] if len(parts) > 1 else ""
+
         col_m1, col_m2 = st.columns(2)
         with col_m1:
-            st.text_input("Nom actuel", value=selected_emp_manage, disabled=True)
+            new_nom_m = st.text_input("Nom de famille", value=val_nom, key=f"m_nom_{selected_emp_manage}")
             new_sex_m = st.selectbox("Sexe", ["M", "F"], index=sex_idx, key="m_sex")
         
         with col_m2:
-            st.write("") # Spacer for alignment
-            st.write("")
+            new_prenoms_m = st.text_input("Prénoms", value=val_prenoms, key=f"m_prenom_{selected_emp_manage}")
             target_service_m = st.selectbox("Service", mgmt_services, index=svc_idx, key="m_svc_select")
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -439,8 +443,16 @@ def view_nouveau_personnel():
                 st.session_state.confirm_action_type = 'UPDATE'
                 if not target_service_m:
                     st.error("Nom du service invalide")
+                elif not new_nom_m or not new_prenoms_m:
+                    st.error("Nom et Prénoms requis")
                 else: 
-                    st.session_state.confirm_emp_data = {'sex': new_sex_m, 'service': target_service_m}
+                    new_full_name = f"{new_nom_m.strip().upper()} {new_prenoms_m.strip()}"
+                    st.session_state.confirm_emp_data = {
+                        'name': new_full_name,
+                        'sex': new_sex_m, 
+                        'service': target_service_m,
+                        'original_name': selected_emp_manage
+                    }
                     st.rerun()
 
         with col_btn2:
@@ -450,13 +462,21 @@ def view_nouveau_personnel():
              
         # Confirmation Dialogs
         if st.session_state.confirm_action_type == 'UPDATE':
-            st.info(f"❓ Confirmer la mise à jour pour **{selected_emp_manage}** ?")
+            # Safe access to current data being confirmed
+            c_data = st.session_state.confirm_emp_data
+            target_name_display = c_data.get('name', selected_emp_manage)
+            
+            st.info(f"❓ Confirmer la mise à jour pour **{target_name_display}** ?")
             col_yes, col_no = st.columns(2)
             if col_yes.button("✅ Oui, mettre à jour", use_container_width=True):
-                data = st.session_state.confirm_emp_data
-                success, msg = db.add_employee(selected_emp_manage, data.get('sex'), data.get('service'))
+                success, msg = db.add_employee(
+                    c_data.get('name'), 
+                    c_data.get('sex'), 
+                    c_data.get('service'),
+                    original_name=c_data.get('original_name')
+                )
                 if success:
-                    st.success(f"Détails mis à jour pour {selected_emp_manage}")
+                    st.success(f"Détails mis à jour pour {target_name_display}")
                     st.session_state.personnel_list = db.load_personnel()
                     st.session_state.confirm_action_type = None
                     st.rerun()

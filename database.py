@@ -128,7 +128,7 @@ class DataManager:
         except Exception as e:
             return False, f"Erreur ajout service: {e}"
 
-    def add_employee(self, name, sexe, service):
+    def add_employee(self, name, sexe, service, original_name=None):
         """Adds or updates an employee in 'Personnel' sheet."""
         if not self.sheet: return False, "Erreur connexion."
         
@@ -138,33 +138,87 @@ class DataManager:
             
             # Check for existing
             if not df.empty and "Nom et Prénoms" in df.columns:
-                existing_idx = df.index[df["Nom et Prénoms"] == name].tolist()
+                # If renaming (original_name provided), search for original name
+                target_name = original_name if original_name else name
+                existing_idx = df.index[df["Nom et Prénoms"] == target_name].tolist()
                 
                 if existing_idx:
                     # Update row (Google Sheets is 1-indexed, header is row 1, so row = index + 2)
                     row_num = existing_idx[0] + 2
-                    # Update Sexe (Col 3) and Service (Col 4)
+                    
+                    # Update Name (Col 2), Sexe (Col 3) and Service (Col 4)
+                    worksheet.update_cell(row_num, 2, name) 
                     worksheet.update_cell(row_num, 3, sexe)
                     worksheet.update_cell(row_num, 4, service)
+                    
+                    # If name changed, update history in Mouvements
+                    if original_name and original_name.strip() != name.strip():
+                        self.update_history_name(original_name, name)
+                        
                     return True, "Mise à jour effectuée."
                 else:
-                    # New ID
-                    new_id = 1
-                    try:
-                        if "N° ordre" in df.columns:
-                            max_id = pd.to_numeric(df["N° ordre"], errors='coerce').max()
-                            new_id = int(max_id) + 1 if pd.notna(max_id) else 1
-                    except:
-                        pass
-                    
-                    worksheet.append_row([new_id, name, sexe, service])
-                    return True, f"Employé ajouté avec succès. (ID: {new_id})"
-            else:
-                worksheet.append_row([1, name, sexe, service])
-                return True, "Employé ajouté avec succès. (ID: 1)"
+                    # If original_name was given but not found, we might want to just add as new
+                    # or error out. Assuming we add as new if target not found.
+                    pass
+
+                # If we get here, either we are adding new, or target wasn't found
+            
+            # New ID
+            new_id = 1
+            try:
+                if "N° ordre" in df.columns:
+                    max_id = pd.to_numeric(df["N° ordre"], errors='coerce').max()
+                    new_id = int(max_id) + 1 if pd.notna(max_id) else 1
+            except:
+                pass
+            
+            worksheet.append_row([new_id, name, sexe, service])
+            return True, f"Employé ajouté avec succès. (ID: {new_id})"
 
         except Exception as e:
             return False, f"Erreur ajout: {e}"
+
+    def update_history_name(self, old_name, new_name):
+        """Updates employee name in 'Mouvements' history to maintain consistency."""
+        if not self.sheet: return
+        try:
+            worksheet = self.sheet.worksheet("Mouvements")
+            # Find all cells with old_name in column 3 (Nom et Prenoms)
+            # This can be slow if many rows. 
+            # cell_list = worksheet.findall(old_name)
+            # Filter by column 3 to be safe? findall searches whole sheet usually? 
+            # findAll in gspread takes a query.
+            
+            # Better approach for batch update if supported, or iterate.
+            # Let's try finding all occurrences in col 3.
+            # Using basic get_all_values might be safer to find indices, then batch update.
+            
+            data = worksheet.get_all_values()
+            # headers is row 1.
+            updates = []
+            
+            # Identify Column Index for "Nom et Prenoms"
+            # We know it is usually col 3 (index 2), but let's check header
+            name_col_idx = 2 # 0-based default
+            if data and "Nom et Prenoms" in data[0]:
+                name_col_idx = data[0].index("Nom et Prenoms")
+                
+            for i, row in enumerate(data):
+                if i == 0: continue # Skip header
+                if len(row) > name_col_idx and row[name_col_idx] == old_name:
+                    # Update this cell. Row is i+1 (1-based)
+                    # Col is name_col_idx + 1 (1-based)
+                    updates.append({
+                        'range': gspread.utils.rowcol_to_a1(i + 1, name_col_idx + 1),
+                        'values': [[new_name]]
+                    })
+            
+            if updates:
+                # Batch update is better than one by one
+                worksheet.batch_update(updates)
+                
+        except Exception as e:
+            print(f"Error updating history: {e}") # Log but don't crash main flow
 
     def delete_employee(self, name):
         """Deletes an employee from 'Personnel' worksheet."""
